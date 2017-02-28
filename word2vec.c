@@ -24,6 +24,13 @@
 #define MAX_SENTENCE_LENGTH 1000
 #define MAX_CODE_LENGTH 40
 
+/*
+ * The size of the hash table for the vocabulary.
+ * The vocabulary won't be allowed to grow beyond 70% of this number.
+ * For instance, if the hash table has 30M entries, then the maximum
+ * vocab size is 21M. This is to minimize the occurrence (and performance
+ * impact) of hash collisions.
+ */
 const int vocab_hash_size = 30000000;  // Maximum 30 * 0.7 = 21M words in the vocabulary
 
 typedef float real;                    // Precision of float numbers
@@ -154,14 +161,31 @@ int GetWordHash(char *word) {
   return hash;
 }
 
-// Returns position of a word in the vocabulary; if the word is not found, returns -1
+/**
+ * ======== SearchVocab ========
+ * Lookup the index in the 'vocab' table of the given 'word'.
+ * Returns -1 if the word is not found.
+ * This function uses a hash table for fast lookup.
+ */
 int SearchVocab(char *word) {
+  // Compute the hash value for 'word'.
   unsigned int hash = GetWordHash(word);
+  
+  // Lookup the index in the hash table, handling collisions as needed.
+  // See 'AddWordToVocab' to see how collisions are handled.
   while (1) {
+    // If the word isn't in the hash table, it's not in the vocab.
     if (vocab_hash[hash] == -1) return -1;
+    
+    // If the input word matches the word stored at the index, we're good,
+    // return the index.
     if (!strcmp(word, vocab[vocab_hash[hash]].word)) return vocab_hash[hash];
+    
+    // Otherwise, we need to scan through the hash table until we find it.
     hash = (hash + 1) % vocab_hash_size;
   }
+  
+  // This will never be reached.
   return -1;
 }
 
@@ -222,7 +246,10 @@ int VocabCompare(const void *a, const void *b) {
     return ((struct vocab_word *)b)->cn - ((struct vocab_word *)a)->cn;
 }
 
-// Sorts the vocabulary by frequency using word counts
+/**
+ * ======== SortVocab ========
+ * Sorts the vocabulary by frequency using word counts
+ */
 void SortVocab() {
   int a, size;
   unsigned int hash;
@@ -366,20 +393,43 @@ void LearnVocabFromTrainFile() {
   AddWordToVocab((char *)"</s>");
   
   while (1) {
+    // Read the next word from the file into the string 'word'.
     ReadWord(word, fin);
+    
+    // Stop when we've reached the end of the file.
     if (feof(fin)) break;
+    
+    // Count the total number of tokens in the training text.
     train_words++;
+    
+    // Print progress at every 100,000 words.
     if ((debug_mode > 1) && (train_words % 100000 == 0)) {
       printf("%lldK%c", train_words / 1000, 13);
       fflush(stdout);
     }
+    
+    // Look up this word in the vocab to see if we've already added it.
     i = SearchVocab(word);
+    
+    // If it's not in the vocab...
     if (i == -1) {
+      // ...add it.
       a = AddWordToVocab(word);
+      
+      // Initialize the word frequency to 1.
       vocab[a].cn = 1;
+    
+    // If it's already in the vocab, just increment the word count.
     } else vocab[i].cn++;
+    
+    // If the vocabulary has grown too large, trim out the most infrequent 
+    // words. The vocabulary is considered "too large" when it's filled more
+    // than 70% of the hash table (this is to try and keep hash collisions
+    // down).
     if (vocab_size > vocab_hash_size * 0.7) ReduceVocab();
   }
+  
+  
   SortVocab();
   if (debug_mode > 0) {
     printf("Vocab size: %lld\n", vocab_size);

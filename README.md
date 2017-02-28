@@ -12,9 +12,11 @@ word2vec training occurs in word2vec.c
     * Parses the command line arguments.
 * TrainModel() - Main entry point to the training process.
 
+### Text Parsing
+The word2vec C project does not include code for parsing and tokenizing your text. It simply accepts a training file with words separated by whitespace (spaces, tabs, or newlines). This means that you'll need to handle the removal of things like punctuation separately.
 
 ### Building the Vocabulary
-`word2vec.c` includes code for constructing a vocabulary from an input text file.
+`word2vec.c` includes code for constructing a vocabulary from the input text file.
 
 The code supports fast lookup of vocab words through a hash table, which maps word strings to their respective `vocab_word` object. 
 
