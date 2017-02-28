@@ -28,12 +28,22 @@ const int vocab_hash_size = 30000000;  // Maximum 30 * 0.7 = 21M words in the vo
 
 typedef float real;                    // Precision of float numbers
 
+/**
+ * ======== vocab_word ========
+ * Properties:
+ *   cn - The word frequency (number of times it appears).
+ *   word - The actual string word.
+ */
 struct vocab_word {
   long long cn;
   int *point;
   char *word, *code, codelen;
 };
 
+/*
+ * ======== Global Variables ========
+ *
+ */
 char train_file[MAX_STRING], output_file[MAX_STRING];
 char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING];
 struct vocab_word *vocab;
@@ -61,7 +71,11 @@ void InitUnigramTable() {
   i = 0;
   d1 = pow(vocab[i].cn, power) / train_words_pow;
   for (a = 0; a < table_size; a++) {
+    // [Chris] - The table may contain multiple elements which hold value 'i'.
+    //           
     table[a] = i;
+    // [Chris] - If the fraction of the table we have filled is greater than the
+    //           fraction of this words weight / all word weights, then move to the next word.
     if (a / (double)table_size > d1) {
       i++;
       d1 += pow(vocab[i].cn, power) / train_words_pow;
@@ -93,7 +107,14 @@ void ReadWord(char *word, FILE *fin) {
   word[a] = 0;
 }
 
-// Returns hash value of a word
+/**
+ * ======== GetWordHash ========
+ * Returns hash value of a word. The hash is an integer between 0 and 
+ * vocab_hash_size (default is 30E6).
+ *
+ * For example, the word 'hat':
+ * hash = ((((h * 257) + a) * 257) + t) % 30E6
+ */
 int GetWordHash(char *word) {
   unsigned long long a, hash = 0;
   for (a = 0; a < strlen(word); a++) hash = hash * 257 + word[a];
@@ -120,22 +141,47 @@ int ReadWordIndex(FILE *fin) {
   return SearchVocab(word);
 }
 
-// Adds a word to the vocabulary
+/**
+ * ======== AddWordToVocab ========
+ * Adds a new word to the vocabulary (one that hasn't been seen yet).
+ */
 int AddWordToVocab(char *word) {
+  // Measure word length.
   unsigned int hash, length = strlen(word) + 1;
+  
+  // Limit string length (default limit is 100 characters).
   if (length > MAX_STRING) length = MAX_STRING;
+  
+  // Allocate and store the word string.
   vocab[vocab_size].word = (char *)calloc(length, sizeof(char));
   strcpy(vocab[vocab_size].word, word);
+  
+  // Initialize the word frequency to 0.
   vocab[vocab_size].cn = 0;
+  
+  // Increment the vocabulary size.
   vocab_size++;
+  
   // Reallocate memory if needed
   if (vocab_size + 2 >= vocab_max_size) {
     vocab_max_size += 1000;
     vocab = (struct vocab_word *)realloc(vocab, vocab_max_size * sizeof(struct vocab_word));
   }
+  
+  // Add the word to the 'vocab_hash' table so that we can map quickly from the
+  // string to its vocab_word structure. 
+  
+  // Hash the word to an integer between 0 and 30E6.
   hash = GetWordHash(word);
-  while (vocab_hash[hash] != -1) hash = (hash + 1) % vocab_hash_size;
+  
+  // If the spot is already taken in the hash table, find the next empty spot.
+  while (vocab_hash[hash] != -1) 
+    hash = (hash + 1) % vocab_hash_size;
+  
+  // Map the hash code to the index of the word in the 'vocab' array.  
   vocab_hash[hash] = vocab_size - 1;
+  
+  // Return the index of the word in the 'vocab' array.
   return vocab_size - 1;
 }
 
@@ -262,18 +308,31 @@ void CreateBinaryTree() {
   free(parent_node);
 }
 
+/**
+ * ======== LearnVocabFromTrainFile ========
+ * Builds a vocabulary from the words found in the training file.
+ *
+ */
 void LearnVocabFromTrainFile() {
   char word[MAX_STRING];
   FILE *fin;
   long long a, i;
+  
+  // Populate the vocab table with -1s.
   for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
+  
+  // Open the training file.
   fin = fopen(train_file, "rb");
   if (fin == NULL) {
     printf("ERROR: training data file not found!\n");
     exit(1);
   }
+  
   vocab_size = 0;
+  
+  // ?
   AddWordToVocab((char *)"</s>");
+  
   while (1) {
     ReadWord(word, fin);
     if (feof(fin)) break;
@@ -587,14 +646,24 @@ void *TrainModelThread(void *id) {
   pthread_exit(NULL);
 }
 
+/**
+ * ======== TrainModel ========
+ * Main entry point to the training process.
+ */
 void TrainModel() {
   long a, b, c, d;
   FILE *fo;
+  
   pthread_t *pt = (pthread_t *)malloc(num_threads * sizeof(pthread_t));
+  
   printf("Starting training using file %s\n", train_file);
+  
   starting_alpha = alpha;
+  
   if (read_vocab_file[0] != 0) ReadVocab(); else LearnVocabFromTrainFile();
+  
   if (save_vocab_file[0] != 0) SaveVocab();
+  
   if (output_file[0] == 0) return;
   InitNet();
   if (negative > 0) InitUnigramTable();
@@ -736,7 +805,10 @@ int main(int argc, char **argv) {
   if ((i = ArgPos((char *)"-iter", argc, argv)) > 0) iter = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-min-count", argc, argv)) > 0) min_count = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-classes", argc, argv)) > 0) classes = atoi(argv[i + 1]);
+  
+  // Allocate the vocabulary table.
   vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
+  
   vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
   expTable = (real *)malloc((EXP_TABLE_SIZE + 1) * sizeof(real));
   for (i = 0; i < EXP_TABLE_SIZE; i++) {
