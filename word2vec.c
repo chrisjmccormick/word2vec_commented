@@ -84,26 +84,58 @@ void InitUnigramTable() {
   }
 }
 
-// Reads a single word from a file, assuming space + tab + EOL to be word boundaries
+/**
+ * ======== ReadWord ========
+ * Reads a single word from a file, assuming space + tab + EOL to be word 
+ * boundaries.
+ *
+ * Parameters:
+ *   word - A char array allocated to hold the maximum length string.
+ *   fin  - The training file.
+ */
 void ReadWord(char *word, FILE *fin) {
+  
+  // 'a' will be the index into 'word'.
   int a = 0, ch;
+  
+  // Read until the end of the word or the end of the file.
   while (!feof(fin)) {
+  
+    // Get the next character.
     ch = fgetc(fin);
+    
+    // ASCII Character 13 is a carriage return 'CR' whereas character 10 is 
+    // newline or line feed 'LF'.
     if (ch == 13) continue;
+    
+    // Check for word boundaries...
     if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {
+      // If the word has at least one character, we're done.
+      // Put the newline back before returning... (TODO - Why?)
       if (a > 0) {
         if (ch == '\n') ungetc(ch, fin);
         break;
       }
+      // If the word is empty and the character is newline, return
+      // this </s> token that I don't understand yet...
       if (ch == '\n') {
         strcpy(word, (char *)"</s>");
         return;
+      // If the word is empty and the character is tab or space, just continue
+      // on to the next character.     
       } else continue;
     }
+    
+    // If the character wasn't space, tab, CR, or newline, add it to the word.
     word[a] = ch;
     a++;
-    if (a >= MAX_STRING - 1) a--;   // Truncate too long words
+    
+    // If the word's too long, truncate it, but keep going till we find the end
+    // of it.
+    if (a >= MAX_STRING - 1) a--;   
   }
+  
+  // Terminate the string will null.
   word[a] = 0;
 }
 
