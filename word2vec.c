@@ -248,20 +248,43 @@ int VocabCompare(const void *a, const void *b) {
 
 /**
  * ======== SortVocab ========
- * Sorts the vocabulary by frequency using word counts
+ * Sorts the vocabulary by frequency using word counts, and removes words that
+ * occur fewer than 'min_count' times in the training text.
+ * 
+ * Removing words from the vocabulary requires recomputing the hash table.
  */
 void SortVocab() {
   int a, size;
   unsigned int hash;
-  // Sort the vocabulary and keep </s> at the first position
+  
+  /*
+   * Sort the vocabulary by number of occurrences, in descending order. 
+   *
+   * Keep </s> at the first position by sorting starting from index 1.
+   *
+   * Sorting the vocabulary this way causes the words with the fewest 
+   * occurrences to be at the end of the vocabulary table. This will allow us
+   * to free the memory associated with the words that get filtered out.
+   */
   qsort(&vocab[1], vocab_size - 1, sizeof(struct vocab_word), VocabCompare);
+  
+  // Clear the vocabulary hash table.
   for (a = 0; a < vocab_hash_size; a++) vocab_hash[a] = -1;
+  
+  // Store the initial vocab size to use in the for loop condition.
   size = vocab_size;
+  
+  // Recompute the number of training words.
   train_words = 0;
+  
+  // For every word currently in the vocab...
   for (a = 0; a < size; a++) {
-    // Words occuring less than min_count times will be discarded from the vocab
+    // If it occurs fewer than 'min_count' times, remove it from the vocabulary.
     if ((vocab[a].cn < min_count) && (a != 0)) {
+      // Decrease the size of the new vocabulary.
       vocab_size--;
+      
+      // Free the memory associated with the word string.
       free(vocab[a].word);
     } else {
       // Hash will be re-computed, as after the sorting it is not actual
@@ -271,7 +294,11 @@ void SortVocab() {
       train_words += vocab[a].cn;
     }
   }
+   
+  // Reallocate the vocab array, chopping off all of the low-frequency words at
+  // the end of the table.
   vocab = (struct vocab_word *)realloc(vocab, (vocab_size + 1) * sizeof(struct vocab_word));
+  
   // Allocate memory for the binary tree construction
   for (a = 0; a < vocab_size; a++) {
     vocab[a].code = (char *)calloc(MAX_CODE_LENGTH, sizeof(char));
