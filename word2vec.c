@@ -53,12 +53,50 @@ struct vocab_word {
  */
 char train_file[MAX_STRING], output_file[MAX_STRING];
 char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING];
+
+/*
+ * ======== vocab ========
+ * This array will hold all of the words in the vocabulary.
+ * This is internal state.
+ */
 struct vocab_word *vocab;
+
 int binary = 0, cbow = 1, debug_mode = 2, window = 5, min_count = 5, num_threads = 12, min_reduce = 1;
+
+/*
+ * ======== vocab_hash ========
+ * This array is the hash table for the vocabulary. Word strings are hashed
+ * to a hash code (an integer), then the hash code is used as the index into
+ * 'vocab_hash', to retrieve the index of the word within the 'vocab' array.
+ */
 int *vocab_hash;
+
+/*
+ * ======== vocab_max_size ========
+ * This is not a limit on the number of words in the vocabulary, but rather
+ * a chunk size for allocating the vocabulary table. The vocabulary table will
+ * be expanded as necessary, and is allocated, e.g., 1,000 words at a time.
+ *
+ * ======== vocab_size ========
+ * Stores the number of unique words in the vocabulary. 
+ * This is not a parameter, but rather internal state. 
+ *
+ * ======== layer1_size ========
+ * This is the number of features in the word vectors.
+ * It is the number of neurons in the hidden layer of the model.
+ */
 long long vocab_max_size = 1000, vocab_size = 0, layer1_size = 100;
+
+/*
+ *
+ */
 long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0, classes = 0;
+
+/*
+ *
+ */
 real alpha = 0.025, starting_alpha, sample = 1e-3;
+
 real *syn0, *syn1, *syn1neg, *expTable;
 clock_t start;
 
@@ -327,8 +365,13 @@ void ReduceVocab() {
   min_reduce++;
 }
 
-// Create binary Huffman tree using the word counts
-// Frequent words will have short uniqe binary codes
+/**
+ * ======== CreateBinaryTree ========
+ * Create binary Huffman tree using the word counts.
+ * Frequent words will have short unique binary codes.
+ * Huffman encoding is used for lossless compression.
+ * The vocab_word structure contains a field for the 'code' for the word.
+ */
 void CreateBinaryTree() {
   long long a, b, i, min1i, min2i, pos1, pos2, point[MAX_CODE_LENGTH];
   char code[MAX_CODE_LENGTH];
@@ -398,6 +441,11 @@ void CreateBinaryTree() {
  * ======== LearnVocabFromTrainFile ========
  * Builds a vocabulary from the words found in the training file.
  *
+ * This function will also build a hash table which allows for fast lookup
+ * from the word string to the corresponding vocab_word object.
+ *
+ * Words that occur fewer than 'min_count' times will be filtered out of
+ * vocabulary.
  */
 void LearnVocabFromTrainFile() {
   char word[MAX_STRING];
@@ -416,7 +464,10 @@ void LearnVocabFromTrainFile() {
   
   vocab_size = 0;
   
-  // ?
+  // The special token </s> is used to represent "words" that are just the
+  // newline character. It's added explicitly here so that it occurs at 
+  // position 0 in the vocab. 
+  // TODO - Still curious what this </s> is really all about...
   AddWordToVocab((char *)"</s>");
   
   while (1) {
@@ -456,12 +507,18 @@ void LearnVocabFromTrainFile() {
     if (vocab_size > vocab_hash_size * 0.7) ReduceVocab();
   }
   
-  
+  // Sort the vocabulary in descending order by number of word occurrences.
+  // Remove (and free the associated memory) for all the words that occur
+  // fewer than 'min_count' times.
   SortVocab();
+  
+  // Report the final vocabulary size, and the total number of words 
+  // (excluding those filtered from the vocabulary) in the training set.
   if (debug_mode > 0) {
     printf("Vocab size: %lld\n", vocab_size);
     printf("Words in train file: %lld\n", train_words);
   }
+  
   file_size = ftell(fin);
   fclose(fin);
 }
@@ -506,33 +563,57 @@ void ReadVocab() {
   fclose(fin);
 }
 
+/**
+ * ======== InitNet ========
+ *
+ */
 void InitNet() {
   long long a, b;
   unsigned long long next_random = 1;
+  
+  // Allocate the hidden layer of the network, which is what becomes the word vectors.
+  // The variable for this layer is 'syn0'.
   a = posix_memalign((void **)&syn0, 128, (long long)vocab_size * layer1_size * sizeof(real));
+  
   if (syn0 == NULL) {printf("Memory allocation failed\n"); exit(1);}
+  
+  // If we're using hierarchical softmax for training...
   if (hs) {
     a = posix_memalign((void **)&syn1, 128, (long long)vocab_size * layer1_size * sizeof(real));
     if (syn1 == NULL) {printf("Memory allocation failed\n"); exit(1);}
     for (a = 0; a < vocab_size; a++) for (b = 0; b < layer1_size; b++)
      syn1[a * layer1_size + b] = 0;
   }
+  
+  // If we're using negative sampling for training...
   if (negative>0) {
+    // Allocate the output layer of the network. 
+    // The variable for this layer is 'syn1neg'.
+    // This layer has the same size as the hidden layer, but is the transpose.
     a = posix_memalign((void **)&syn1neg, 128, (long long)vocab_size * layer1_size * sizeof(real));
+    
     if (syn1neg == NULL) {printf("Memory allocation failed\n"); exit(1);}
+    
+    // Set all of the weights in the output layer to 0.
     for (a = 0; a < vocab_size; a++) for (b = 0; b < layer1_size; b++)
      syn1neg[a * layer1_size + b] = 0;
   }
+  
+  // Randomly initialize the weights for the hidden layer (word vector layer).
+  // TODO - What's the equation here?
   for (a = 0; a < vocab_size; a++) for (b = 0; b < layer1_size; b++) {
     next_random = next_random * (unsigned long long)25214903917 + 11;
     syn0[a * layer1_size + b] = (((next_random & 0xFFFF) / (real)65536) - 0.5) / layer1_size;
   }
+  
+  // Create a binary tree for Huffman coding.
+  // TODO - As best I can tell, this is only used for hierarchical softmax training...
   CreateBinaryTree();
 }
 
 /**
  * ======== TrainModelThread ========
- * This function appears to contain the actual training math.
+ * This function performs the training of the model.
  */
 void *TrainModelThread(void *id) {
 
@@ -769,16 +850,32 @@ void TrainModel() {
   
   starting_alpha = alpha;
   
+  // Either load a pre-existing vocabulary, or learn the vocabulary from 
+  // the training file.
   if (read_vocab_file[0] != 0) ReadVocab(); else LearnVocabFromTrainFile();
   
+  // Save the vocabulary.
   if (save_vocab_file[0] != 0) SaveVocab();
   
+  // Stop here if no output_file was specified.
   if (output_file[0] == 0) return;
+  
+  // Allocate the weight matrices and initialize them.
   InitNet();
+
+  // If we're using negative sampling, initialize the unigram table, which
+  // is used to pick words to use as "negative samples" (with more frequent
+  // words being picked more often).  
   if (negative > 0) InitUnigramTable();
+  
+  // Record the start time of training.
   start = clock();
+  
+  // Run training, which occurs in the 'TrainModelThread' function.
   for (a = 0; a < num_threads; a++) pthread_create(&pt[a], NULL, TrainModelThread, (void *)a);
   for (a = 0; a < num_threads; a++) pthread_join(pt[a], NULL);
+  
+  
   fo = fopen(output_file, "wb");
   if (classes == 0) {
     // Save the word vectors
