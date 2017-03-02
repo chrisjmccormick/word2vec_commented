@@ -93,7 +93,13 @@ long long vocab_max_size = 1000, vocab_size = 0, layer1_size = 100;
 long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0, classes = 0;
 
 /*
+ * ======== alpha ========
+ * TODO - This is a learning rate parameter.
  *
+ * ======== starting_alpha ========
+ *
+ * ======== sample ========
+ * This parameter controls the subsampling of frequent words.
  */
 real alpha = 0.025, starting_alpha, sample = 1e-3;
 
@@ -227,7 +233,11 @@ int SearchVocab(char *word) {
   return -1;
 }
 
-// Reads a word and returns its index in the vocabulary
+/**
+ * ======== ReadWordIndex ========
+ * Reads the next word from the training file, and returns its index into the
+ * 'vocab' table.
+ */
 int ReadWordIndex(FILE *fin) {
   char word[MAX_STRING];
   ReadWord(word, fin);
@@ -617,17 +627,31 @@ void InitNet() {
  */
 void *TrainModelThread(void *id) {
 
+  /*
+   * word - Stores the index of a word in the vocab table.
+   * word_count - Stores the total number of training words processed.
+   */
   long long a, b, d, cw, word, last_word, sentence_length = 0, sentence_position = 0;
   long long word_count = 0, last_word_count = 0, sen[MAX_SENTENCE_LENGTH + 1];
   long long l1, l2, c, target, label, local_iter = iter;
   unsigned long long next_random = (long long)id;
   real f, g;
   clock_t now;
+  
   real *neu1 = (real *)calloc(layer1_size, sizeof(real));
+  
   real *neu1e = (real *)calloc(layer1_size, sizeof(real));
+  
+  
+  // Open the training file and seek to the portion of the file that this 
+  // thread is responsible for.
   FILE *fi = fopen(train_file, "rb");
   fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
+  
+  // This loop covers the whole training operation...
   while (1) {
+    // This block prints a progress update, and also adjusts the training 
+    // 'alpha' parameter.
     if (word_count - last_word_count > 10000) {
       word_count_actual += word_count - last_word_count;
       last_word_count = word_count;
@@ -641,19 +665,80 @@ void *TrainModelThread(void *id) {
       alpha = starting_alpha * (1 - word_count_actual / (real)(iter * train_words + 1));
       if (alpha < starting_alpha * 0.0001) alpha = starting_alpha * 0.0001;
     }
+    
+    // TODO - Under what condition would sentence_length not be zero?
     if (sentence_length == 0) {
       while (1) {
+        // Read the next word from the training data and lookup its index in 
+        // the vocab table. 'word' is the word's vocab index.
         word = ReadWordIndex(fi);
+        
         if (feof(fi)) break;
+        
+        // If the word doesn't exist in the vocabulary, skip it.
         if (word == -1) continue;
+        
+        // Track the total number of training words processed.
         word_count++;
+        
+        // 'vocab' word 0 is a special token which indicates the end of a 
+        // sentence.
         if (word == 0) break;
+        
+        /* 
+         * =================================
+         *   Subsampling of Frequent Words
+         * =================================
+         * This code randomly discards training words, but is designed to 
+         * keep the relative frequencies the same. That is, less frequent
+         * words will be discarded less often. 
+         *
+         * To decide whether to discard a word, we first calculate a value
+         * 'ran' which is a fraction between 0 and 1 and is based on the 
+         * word's frequency.
+         *
+         * We also generate a random fraction between 0 and 1. If 'ran' is
+         * less than this random fraction, we discard this word. This means
+         * that the smaller 'ran' is, the more likely it is that we'll discard
+         * this word. 'ran' is actually the probability that the word will be 
+         * kept.
+         *
+         * The quantity (vocab[word].cn / train_words) is the fraction of all 
+         * the training words which are 'word'. Let's represent this fraction
+         * by x.
+         *
+         * Using the default 'sample' value of 0.001, the equation for ran is:
+         *   ran = (sqrt(x / 0.001) + 1) * (0.001 / x)
+         *
+         * This can be rearranged to:
+         *   ran = 1 / sqrt(x / 0.001) + (0.001 / x)
+         * 
+         * You can plot this function to see it's behavior; it has a curved 
+         * L shape.
+         * 
+         * Here are some interesting points in this function (again this is
+         * using the default sample value of 0.001).
+         *   - ran = 1 (100% chance of being kept) when x <= 0.0026.
+         *      - That is, any word which is 0.0026 of the words *or fewer* 
+         *        will be kept 100% of the time. Only words which represent 
+         *        more than 0.26% of the total words will be subsampled.
+         *   - ran = 0.5 (50% chance of being kept) when x = 0.00746. 
+         *   - ran = 0.033 (3.3% chance of being kept) when x = 1.
+         *       - That is, if a word represented 100% of the training set
+         *         (which of course would never happen), it would only be
+         *         kept 3.3% of the time.
+         */
         // [Google] The subsampling randomly discards frequent words while keeping the ranking same
         // [Chris] - If the word doesn't pass the subsampling test, we skip it and don't add it to 'sentence'.
         //           This means it is neither used as an input word or a context word for other inputs.
+        // 
         if (sample > 0) {
           real ran = (sqrt(vocab[word].cn / (sample * train_words)) + 1) * (sample * train_words) / vocab[word].cn;
+          // The multiplier is 25.xxx billion. So next_random is a 64-bit integer.
           next_random = next_random * (unsigned long long)25214903917 + 11;
+          // (next_random & 0xFFFF) extracts just the lower 16 bits of the 
+          // random number. Dividing this by 65536 (2^16) gives us a fraction
+          // between 0 and 1.
           if (ran < (next_random & 0xFFFF) / (real)65536) continue;
         }
         sen[sentence_length] = word;
