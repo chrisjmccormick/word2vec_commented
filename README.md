@@ -1,16 +1,23 @@
 
 #word2vec_commented
-This project is a functionally unaltered version of Google's published word2vec implementation, but which includes source comments.
+This project is a functionally unaltered version of Google's published word2vec implementation in C, but which includes source comments.
 
-This is a work in progress.
+My focus is on the skip-gram architecture with negative sampling, so for now I have ignored the CBOW and Hierarchical Softmax code.
+
+Because the code supports both models and both training approaches, I highly recommended viewing the code in an editor which allows you to collapse code blocks. The training code is much more readable when you hide the implementations that you aren't interested in. 
 
 ## word2vec Model Training
 
 word2vec training occurs in word2vec.c
 
+Almost all of the functions in word2vec.c happen to be related to building and maintaining the vocabulary. If you remove the vocabulary functions, here's what's left:
+
 * main() - Entry point to the script.
     * Parses the command line arguments.
 * TrainModel() - Main entry point to the training process.
+    * Learns the vocabulary, initializes the network, and kicks off the training threads.
+* TrainModelThread() - Performs the actual training.
+    * Each thread operates on a different portion of the input text file.
 
 ### Text Parsing
 The word2vec C project does not include code for parsing and tokenizing your text. It simply accepts a training file with words separated by whitespace (spaces, tabs, or newlines). This means that you'll need to handle the removal of things like punctuation separately.
