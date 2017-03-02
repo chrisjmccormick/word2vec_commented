@@ -100,6 +100,9 @@ long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0, class
  *
  * ======== sample ========
  * This parameter controls the subsampling of frequent words.
+ * Smaller values of 'sample' mean words are less likely to be kept.
+ * Set 'sample' to 0 to disable subsampling.
+ * See the comments in the subsampling section for more details.
  */
 real alpha = 0.025, starting_alpha, sample = 1e-3;
 
@@ -167,8 +170,8 @@ void ReadWord(char *word, FILE *fin) {
         if (ch == '\n') ungetc(ch, fin);
         break;
       }
-      // If the word is empty and the character is newline, return
-      // this </s> token that I don't understand yet...
+      // If the word is empty and the character is newline, treat this as the
+      // end of a "sentence" and mark it with the token </s>.
       if (ch == '\n') {
         strcpy(word, (char *)"</s>");
         return;
@@ -474,10 +477,10 @@ void LearnVocabFromTrainFile() {
   
   vocab_size = 0;
   
-  // The special token </s> is used to represent "words" that are just the
-  // newline character. It's added explicitly here so that it occurs at 
-  // position 0 in the vocab. 
-  // TODO - Still curious what this </s> is really all about...
+  // The special token </s> is used to mark the end of a sentence. In training,
+  // the context window does not go beyond the ends of a sentence.
+  // 
+  // Add </s> explicitly here so that it occurs at position 0 in the vocab. 
   AddWordToVocab((char *)"</s>");
   
   while (1) {
@@ -681,8 +684,8 @@ void *TrainModelThread(void *id) {
         // Track the total number of training words processed.
         word_count++;
         
-        // 'vocab' word 0 is a special token which indicates the end of a 
-        // sentence.
+        // 'vocab' word 0 is a special token "</s>" which indicates the end of 
+        // a sentence.
         if (word == 0) break;
         
         /* 
@@ -693,15 +696,11 @@ void *TrainModelThread(void *id) {
          * keep the relative frequencies the same. That is, less frequent
          * words will be discarded less often. 
          *
-         * To decide whether to discard a word, we first calculate a value
-         * 'ran' which is a fraction between 0 and 1 and is based on the 
-         * word's frequency.
-         *
-         * We also generate a random fraction between 0 and 1. If 'ran' is
-         * less than this random fraction, we discard this word. This means
-         * that the smaller 'ran' is, the more likely it is that we'll discard
-         * this word. 'ran' is actually the probability that the word will be 
-         * kept.
+         * We first calculate the probability that we want to *keep* the word;
+         * this is the value 'ran'. Then, to decide whether to keep the word,
+         * we generate a random fraction (0.0 - 1.0), and if 'ran' is smaller
+         * than this number, we discard the word. This means that the smaller 
+         * 'ran' is, the more likely it is that we'll discard this word. 
          *
          * The quantity (vocab[word].cn / train_words) is the fraction of all 
          * the training words which are 'word'. Let's represent this fraction
@@ -709,9 +708,6 @@ void *TrainModelThread(void *id) {
          *
          * Using the default 'sample' value of 0.001, the equation for ran is:
          *   ran = (sqrt(x / 0.001) + 1) * (0.001 / x)
-         *
-         * This can be rearranged to:
-         *   ran = 1 / sqrt(x / 0.001) + (0.001 / x)
          * 
          * You can plot this function to see it's behavior; it has a curved 
          * L shape.
@@ -727,24 +723,38 @@ void *TrainModelThread(void *id) {
          *       - That is, if a word represented 100% of the training set
          *         (which of course would never happen), it would only be
          *         kept 3.3% of the time.
+         *
+         * NOTE: Seems like it would be more efficient to pre-calculate this 
+         *       probability for each word and store it in the vocab table...
+         *
+         * Words that are discarded by subsampling aren't added to our training
+         * 'sentence'. This means the discarded word is neither used as an 
+         * input word or a context word for other inputs.
          */
-        // [Google] The subsampling randomly discards frequent words while keeping the ranking same
-        // [Chris] - If the word doesn't pass the subsampling test, we skip it and don't add it to 'sentence'.
-        //           This means it is neither used as an input word or a context word for other inputs.
-        // 
         if (sample > 0) {
+          // Calculate the probability of keeping 'word'.
           real ran = (sqrt(vocab[word].cn / (sample * train_words)) + 1) * (sample * train_words) / vocab[word].cn;
-          // The multiplier is 25.xxx billion. So next_random is a 64-bit integer.
+          
+          // Generate a random number.
+          // The multiplier is 25.xxx billion, so 'next_random' is a 64-bit integer.
           next_random = next_random * (unsigned long long)25214903917 + 11;
+
+          // If the probability is less than a random fraction, discard the word.
+          //
           // (next_random & 0xFFFF) extracts just the lower 16 bits of the 
           // random number. Dividing this by 65536 (2^16) gives us a fraction
-          // between 0 and 1.
+          // between 0 and 1. So the code is just generating a random fraction.
           if (ran < (next_random & 0xFFFF) / (real)65536) continue;
         }
+        
+        // If we kept the word, add it to the sentence.
         sen[sentence_length] = word;
         sentence_length++;
+        
+        // Verify the sentence isn't too long.
         if (sentence_length >= MAX_SENTENCE_LENGTH) break;
       }
+      
       sentence_position = 0;
     }
     if (feof(fi) || (word_count > train_words / num_threads)) {
