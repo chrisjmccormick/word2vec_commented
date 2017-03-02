@@ -641,8 +641,10 @@ void *TrainModelThread(void *id) {
   real f, g;
   clock_t now;
   
+  // neu1 is only used by the CBOW architecture.
   real *neu1 = (real *)calloc(layer1_size, sizeof(real));
   
+  // neu1e is used by both architectures.
   real *neu1e = (real *)calloc(layer1_size, sizeof(real));
   
   
@@ -772,8 +774,9 @@ void *TrainModelThread(void *id) {
     for (c = 0; c < layer1_size; c++) neu1[c] = 0;
     for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
     next_random = next_random * (unsigned long long)25214903917 + 11;
-    // [Chris] - 'b' becomes a random integer between 0 and 'window'.
-    //           This is the amount we will shrink the window size by.
+    
+    // 'b' becomes a random integer between 0 and 'window'.
+    // This is the amount we will shrink the window size by.
     b = next_random % window;
     
     /* 
@@ -848,12 +851,20 @@ void *TrainModelThread(void *id) {
      * ====================================
      * sen - This is the array of words in the sentence. Subsampling has already been
      *       applied. I don't know what the word representation is...
-     * sentence_position - This is the index of the current input word.
-     * a - Offset into the current window, relative to the window start.
-     *     a will range from 0 to (window * 2) (not sure if it's inclusive or not).
-     * c - 'c' is the index of the current context word, relative to the beginning of
-     *     the sentence.
      *
+     * sentence_position - This is the index of the current input word.
+     *
+     * a - Offset into the current window, relative to the window start.
+     *     a will range from 0 to (window * 2) (not sure if it's inclusive or
+     *      not).
+     *
+     * c - 'c' is the index of the current context word, relative to the 
+     *     beginning of the sentence.
+     *
+     * syn0 - The hidden layer weights.
+     *
+     * l1 - Index into the hidden layer (syn0). Index of the start of the
+     *      weights for the current input word.
      */
     else {  //train skip-gram
       for (a = b; a < window * 2 + 1 - b; a++) if (a != window) {
@@ -889,23 +900,30 @@ void *TrainModelThread(void *id) {
         }
         
         // NEGATIVE SAMPLING
-        // [Chris] - Rather than performing backpropagation for every word in our vocabulary,
-        //           we only perform it for a few words (the number of words is given by 'd').
-        //           These words are selected using a "unigram" distribution, which is generated
-        //           in the function InitUnigramTable
+        // Rather than performing backpropagation for every word in our vocabulary,
+        // we only perform it for a few words (the number of words is given by 'd').
+        // These words are selected using a "unigram" distribution, which is generated
+        // in the function InitUnigramTable
         if (negative > 0) for (d = 0; d < negative + 1; d++) {
           if (d == 0) {
             target = word;
             label = 1;
           } else {
+            // Pick a random word to use as a 'negative sample'; do this using 
+            // the unigram table.
+            
             // Get a random integer.
             next_random = next_random * (unsigned long long)25214903917 + 11;
-            // 
+            
+            // 'target' becomes the index of the word in the vocab to use as
+            // the negative sample.
             target = table[(next_random >> 16) % table_size];
+            
             if (target == 0) target = next_random % (vocab_size - 1) + 1;
             if (target == word) continue;
             label = 0;
           }
+          // Get the index of the target word in the output layer.
           l2 = target * layer1_size;
           f = 0;
           for (c = 0; c < layer1_size; c++) f += syn0[c + l1] * syn1neg[c + l2];
