@@ -15,6 +15,8 @@ word2vec training occurs in word2vec.c
 ### Text Parsing
 The word2vec C project does not include code for parsing and tokenizing your text. It simply accepts a training file with words separated by whitespace (spaces, tabs, or newlines). This means that you'll need to handle the removal of things like punctuation separately.
 
+The code expects the text to be divided into sentences (with a default maximum length of 1,000 words). The end of a sentence is marked by two consecutive newlines "\n\n"; that is, there should be a blank line in between each sentence.
+
 It also does not include the code for phrase recognition (e.g., treating "New York" as one word), though this was mentioned in their second paper "Distributed Representations of Words and Phrases and their Compositionality", and is clearly present in their published model trained on the Google News dataset. So phrase recognition would also need to be implemented separately, and then the phrases could be recorded in the training text using underscores in place of spaces. For example, United_States or New_York.
 
 ### Building the Vocabulary
