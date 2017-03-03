@@ -1,8 +1,10 @@
 
 #word2vec_commented
-This project is a functionally unaltered version of Google's published word2vec implementation in C, but which includes source comments.
+This project is a functionally unaltered version of Google's published [word2vec implementation in C](https://code.google.com/archive/p/word2vec/), but which includes source comments. 
 
-My focus is on the skip-gram architecture with negative sampling, so for now I have ignored the CBOW and Hierarchical Softmax code.
+If you're new to word2vec, I recommending reading [my tutorial](http://mccormickml.com/2016/04/19/word2vec-tutorial-the-skip-gram-model/) first.
+
+My focus is on the code in word2vec.c for training the skip-gram architecture with negative sampling, so for now I have ignored the CBOW and Hierarchical Softmax code. I also haven't looked much at the testing code.
 
 Because the code supports both models and both training approaches, I highly recommended viewing the code in an editor which allows you to collapse code blocks. The training code is much more readable when you hide the implementations that you aren't interested in. 
 
