@@ -165,8 +165,8 @@ void ReadWord(char *word, FILE *fin) {
     // Check for word boundaries...
     if ((ch == ' ') || (ch == '\t') || (ch == '\n')) {
       // If the word has at least one character, we're done.
-      // Put the newline back before returning... (TODO - Why?)
       if (a > 0) {
+        // Put the newline back before returning so that we find it next time.
         if (ch == '\n') ungetc(ch, fin);
         break;
       }
@@ -189,7 +189,7 @@ void ReadWord(char *word, FILE *fin) {
     if (a >= MAX_STRING - 1) a--;   
   }
   
-  // Terminate the string will null.
+  // Terminate the string with null.
   word[a] = 0;
 }
 
