@@ -4,7 +4,7 @@ This project is a functionally unaltered version of Google's published [word2vec
 
 If you're new to word2vec, I recommending reading [my tutorial](http://mccormickml.com/2016/04/19/word2vec-tutorial-the-skip-gram-model/) first.
 
-My focus is on the code in word2vec.c for training the skip-gram architecture with negative sampling, so for now I have ignored the CBOW and Hierarchical Softmax code. I also haven't looked much at the testing code.
+My focus is on the code in word2vec.c for training the skip-gram architecture with negative sampling, so for now I have ignored the CBOW and Hierarchical Softmax code. I also haven't looked much at the testing code. I have also commented the word2phrase.c tool, which implements the phrase detection.
 
 Because the code supports both models and both training approaches, I highly recommended viewing the code in an editor which allows you to collapse code blocks. The training code is much more readable when you hide the implementations that you aren't interested in. 
 
@@ -24,9 +24,9 @@ Almost all of the functions in word2vec.c happen to be related to building and m
 ### Text Parsing
 The word2vec C project does not include code for parsing and tokenizing your text. It simply accepts a training file with words separated by whitespace (spaces, tabs, or newlines). This means that you'll need to handle the removal of things like punctuation separately.
 
-The code expects the text to be divided into sentences (with a default maximum length of 1,000 words). The end of a sentence is marked by two consecutive newlines "\n\n"; that is, there should be a blank line in between each sentence.
+The code expects the text to be divided into sentences (with a default maximum length of 1,000 words). The end of a sentence is marked by a single newline character "\n"--that is, there should be one sentence per line in the file.
 
-It also does not include the code for phrase recognition (e.g., treating "New York" as one word), though this was mentioned in their second paper "Distributed Representations of Words and Phrases and their Compositionality", and is clearly present in their published model trained on the Google News dataset. So phrase recognition would also need to be implemented separately, and then the phrases could be recorded in the training text using underscores in place of spaces. For example, United_States or New_York.
+I've also commented the word2phrase.c tool which handles phrase detection. This tool is used to actually produce a new version of your training file where phrases like "New York" are replaced with a single token, "New_York". Each run of the word2phrase tool looks at combinations of two words (or tokens), so the first pass would turn "New York" into "New_York" and the second pass would turn "New_York City" into "New_York_City".
 
 ### Building the Vocabulary
 `word2vec.c` includes code for constructing a vocabulary from the input text file.
