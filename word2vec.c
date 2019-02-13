@@ -115,25 +115,62 @@ int *table;
 
 /**
  * ======== InitUnigramTable ========
+ * This table is used to implement negative sampling.
+ * Each word is given a weight equal to it's frequency (word count) raised to
+ * the 3/4 power. The probability for a selecting a word is just its weight 
+ * divided by the sum of weights for all words. 
+ *
+ * Note that the vocabulary has been sorted by word count, descending, such 
+ * that we will go through the vocabulary from most frequent to least.
  */
 void InitUnigramTable() {
   int a, i;
   double train_words_pow = 0;
+  
   double d1, power = 0.75;
+  
+  // Allocate the table. It's bigger than the vocabulary, because words will
+  // appear in it multiple times based on their frequency.
+  // Every vocab word appears at least once in the table.
+  // The size of the table relative to the size of the vocab dictates the 
+  // resolution of the sampling. A larger unigram table means the negative 
+  // samples will be selected with a probability that more closely matches the
+  // probability calculated by the equation.
   table = (int *)malloc(table_size * sizeof(int));
+  
+  // Calculate the denominator, which is the sum of weights for all words.
   for (a = 0; a < vocab_size; a++) train_words_pow += pow(vocab[a].cn, power);
+  
+  // 'i' is the vocabulary index of the current word, whereas 'a' will be
+  // the index into the unigram table.
   i = 0;
+  
+  // Calculate the probability that we choose word 'i'. This is a fraction
+  // betwee 0 and 1.
   d1 = pow(vocab[i].cn, power) / train_words_pow;
+  
+  // Loop over all positions in the table.
   for (a = 0; a < table_size; a++) {
-    // [Chris] - The table may contain multiple elements which hold value 'i'.
-    //           
+    
+    // Store word 'i' in this position. Word 'i' will appear multiple times
+    // in the table, based on its frequency in the training data.    
     table[a] = i;
-    // [Chris] - If the fraction of the table we have filled is greater than the
-    //           fraction of this words weight / all word weights, then move to the next word.
+    
+    // If the fraction of the table we have filled is greater than the
+    // probability of choosing this word, then move to the next word.
     if (a / (double)table_size > d1) {
+      // Move to the next word.
       i++;
+      
+      // Calculate the probability for the new word, and accumulate it with 
+      // the probabilities of all previous words, so that we can compare d1 to
+      // the percentage of the table that we have filled.
       d1 += pow(vocab[i].cn, power) / train_words_pow;
     }
+    // Don't go past the end of the vocab. 
+    // The total weights for all words should sum up to 1, so there shouldn't
+    // be any extra space at the end of the table. Maybe it's possible to be
+    // off by 1, though? Or maybe this is just precautionary.
     if (i >= vocab_size) i = vocab_size - 1;
   }
 }
@@ -781,9 +818,11 @@ void *TrainModelThread(void *id) {
     for (c = 0; c < layer1_size; c++) neu1[c] = 0;
     for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
     
+    // This is a standard random integer generator, as seen here:
+    // https://en.wikipedia.org/wiki/Linear_congruential_generator
     next_random = next_random * (unsigned long long)25214903917 + 11;
     
-    // 'b' becomes a random integer between 0 and 'window'.
+    // 'b' becomes a random integer between 0 and 'window' - 1.
     // This is the amount we will shrink the window size by.
     b = next_random % window;
     
