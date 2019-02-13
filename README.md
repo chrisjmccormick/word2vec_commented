@@ -1,5 +1,5 @@
 
-#word2vec_commented
+# word2vec_commented
 This project is a functionally unaltered version of Google's published [word2vec implementation in C](https://code.google.com/archive/p/word2vec/), but which includes source comments. 
 
 If you're new to word2vec, I recommending reading [my tutorial](http://mccormickml.com/2016/04/19/word2vec-tutorial-the-skip-gram-model/) first.
