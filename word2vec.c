@@ -106,6 +106,22 @@ long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0, class
  */
 real alpha = 0.025, starting_alpha, sample = 1e-3;
 
+/*
+ * IMPORTANT - Note that the weight matrices are stored as 1D arrays, not
+ * 2D matrices, so to access row 'i' of syn0, the index is (i * layer1_size).
+ * 
+ * ======== syn0 ========
+ * This is the hidden layer weights (which is also the word vectors!)
+ *
+ * ======== syn1 ========
+ * This is the output layer weights *if using heirarchical softmax*
+ *
+ * ======== syn1neg ========
+ * This is the output layer weights *if using negative sampling*
+ *
+ * ======== expTable ========
+ * Stores precalcultaed activations for the output layer.
+ */
 real *syn0, *syn1, *syn1neg, *expTable;
 clock_t start;
 
@@ -905,12 +921,22 @@ void *TrainModelThread(void *id) {
      *     a will range from 0 to (window * 2) (TODO - not sure if it's inclusive or
      *      not).
      *
-     * c - 'c' is the index of the current context word *within the sentence*
+     * b - The amount to shrink the context window by.
      *
-     * syn0 - The hidden layer weights.
+     * c - 'c' is a scratch variable used in two unrelated ways:
+     *       1. It's first used as the index of the current context word 
+     *          within the sentence (the `sen` array).
+     *       2. It's then used as the for-loop variable for calculating
+     *          vector dot-products and other arithmetic.
+     *
+     * syn0 - The hidden layer weights. Note that the weights are stored as a
+     *        1D array, so word 'i' is found at (i * layer1_size).
      *
      * l1 - Index into the hidden layer (syn0). Index of the start of the
      *      weights for the current input word.
+     *
+     * target - The output word we're working on. If it's the positive sample
+     *          then `label` is 1. `label` is 0 for negative samples.
      */
     else {  
       // Loop over the positions in the context window (skipping the word at
@@ -1006,6 +1032,8 @@ void *TrainModelThread(void *id) {
           
           // Calculate the dot-product between the input words weights (in 
           // syn0) and the output word's weights (in syn1neg).
+          // Note that this calculates the dot-product manually using a for
+          // loop over the vector elements!
           f = 0;
           for (c = 0; c < layer1_size; c++) f += syn0[c + l1] * syn1neg[c + l2];
           
