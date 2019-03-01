@@ -846,21 +846,86 @@ void *TrainModelThread(void *id) {
      * ====================================
      *        CBOW Architecture
      * ====================================
+     * sen - This is the array of words in the sentence. Subsampling has 
+     *       already been applied. Words are represented by their ids.
+     *
+     * sentence_position - This is the index of the current input word.
+     *
+     * a - Offset into the current window, relative to the window start.
+     *     a will range from 0 to (window * 2) 
+     *
+     * b - The amount to shrink the context window by.
+     *
+     * c - 'c' is a scratch variable used in two unrelated ways:
+     *       1. It's first used as the index of the current context word 
+     *          within the sentence (the `sen` array).
+     *       2. It's then used as the for-loop variable for calculating
+     *          vector dot-products and other arithmetic.
+     *
+     * syn0 - The hidden layer weights. Note that the weights are stored as a
+     *        1D array, so word 'i' is found at (i * layer1_size).
+     *
+     * target - The output word we're working on. If it's the positive sample
+     *          then `label` is 1. `label` is 0 for negative samples.  
+     *
+     * neu1 - This vector will hold the *average* of all of the context word
+     *        vectors. This is the output of the hidden layer for CBOW.
+     *
+     * neu1e - Holds the gradient for updating the hidden layer weights.
+     *         It's a vector of length 300, not a matrix.
+     *         This same gradient update is applied to all context word 
+     *         vectors.
      */
     if (cbow) {  //train the cbow architecture
       // in -> hidden
       cw = 0;
+      
+      // This loop will sum together the word vectors for all of the context
+      // words.
+      //
+      // Loop over the positions in the context window (skipping the word at
+      // the center). 'a' is just the offset within the window, it's not the 
+      // index relative to the beginning of the sentence.
       for (a = b; a < window * 2 + 1 - b; a++) if (a != window) {
+
+        // Convert the window offset 'a' into an index 'c' into the sentence 
+        // array.
         c = sentence_position - window + a;
+        
+        // Verify c isn't outisde the bounds of the sentence.
         if (c < 0) continue;
         if (c >= sentence_length) continue;
+        
+        // Get the context word. That is, get the id of the word (its index in
+        // the vocab table).
         last_word = sen[c];
+        
+        // At this point we have two words identified:
+        //   'word' - The word (word ID) at our current position in the 
+        //            sentence (in the center of a context window).
+        //   'last_word' - The word (word ID) at a position within the context
+        //                 window.       
+        
+        // Verify that the word exists in the vocab
         if (last_word == -1) continue;
+        
+        // Add the word vector for this context word to the running sum in 
+        // neur1.
+        // `layer1_size` is 300, `neu1` is length 300
         for (c = 0; c < layer1_size; c++) neu1[c] += syn0[c + last_word * layer1_size];
+        
+        // Count the number of context words.
         cw++;
       }
+      
+      // Skip if there were somehow no context words.
       if (cw) {
+        
+        // neu1 was the sum of the context word vectors, and now becomes
+        // their average. 
         for (c = 0; c < layer1_size; c++) neu1[c] /= cw;
+        
+        // // HIERARCHICAL SOFTMAX
         if (hs) for (d = 0; d < vocab[word].codelen; d++) {
           f = 0;
           l2 = vocab[word].point[d] * layer1_size;
@@ -876,34 +941,104 @@ void *TrainModelThread(void *id) {
           // Learn weights hidden -> output
           for (c = 0; c < layer1_size; c++) syn1[c + l2] += g * neu1[c];
         }
+        
         // NEGATIVE SAMPLING
+        // Rather than performing backpropagation for every word in our 
+        // vocabulary, we only perform it for the positive sample and a few
+        // negative samples (the number of words is given by 'negative').
+        // These negative words are selected using a "unigram" distribution, 
+        // which is generated in the function InitUnigramTable.        
         if (negative > 0) for (d = 0; d < negative + 1; d++) {
+          // On the first iteration, we're going to train the positive sample.
           if (d == 0) {
             target = word;
             label = 1;
+          
+          // On the other iterations, we'll train the negative samples.
           } else {
+            // Pick a random word to use as a 'negative sample'; do this using 
+            // the unigram table.
+            
+            // Get a random integer.              
             next_random = next_random * (unsigned long long)25214903917 + 11;
+            
+            // 'target' becomes the index of the word in the vocab to use as
+            // the negative sample.            
             target = table[(next_random >> 16) % table_size];
+            
+            // If the target is the special end of sentence token, then just
+            // pick a random word from the vocabulary instead.            
             if (target == 0) target = next_random % (vocab_size - 1) + 1;
+
+            // Don't use the positive sample as a negative sample!            
             if (target == word) continue;
+            
+            // Mark this as a negative example.
             label = 0;
           }
+          
+          // At this point, target might either be the positive sample or a 
+          // negative sample, depending on the value of `label`.
+          
+          // Get the index of the target word in the output layer.
           l2 = target * layer1_size;
+          
+          // Calculate the dot product between:
+          //   neu1 - The average of the context word vectors.
+          //   syn1neg[l2] - The output weights for the target word.
           f = 0;
           for (c = 0; c < layer1_size; c++) f += neu1[c] * syn1neg[c + l2];
+
+          // This block does two things:
+          //   1. Calculates the output of the network for this training
+          //      pair, using the expTable to evaluate the output layer
+          //      activation function.
+          //   2. Calculate the error at the output, stored in 'g', by
+          //      subtracting the network output from the desired output, 
+          //      and finally multiply this by the learning rate.          
           if (f > MAX_EXP) g = (label - 1) * alpha;
           else if (f < -MAX_EXP) g = (label - 0) * alpha;
           else g = (label - expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
+          
+          // Multiply the error by the output layer weights.
+          // (I think this is the gradient calculation?)
+          // Accumulate these gradients over all of the negative samples.          
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg[c + l2];
+
+          // Update the output layer weights by multiplying the output error
+          // by the average of the context word vectors.
           for (c = 0; c < layer1_size; c++) syn1neg[c + l2] += g * neu1[c];
         }
+         
         // hidden -> in
+        // Backpropagate the error to the hidden layer (the word vectors).
+        // This code is used both for heirarchical softmax and for negative
+        // sampling.
+        //
+        // Loop over the positions in the context window (skipping the word at
+        // the center). 'a' is just the offset within the window, it's not 
+        // the index relative to the beginning of the sentence.
         for (a = b; a < window * 2 + 1 - b; a++) if (a != window) {
+          // Convert the window offset 'a' into an index 'c' into the sentence 
+          // array.
           c = sentence_position - window + a;
+          
+          // Verify c isn't outisde the bounds of the sentence.
           if (c < 0) continue;
           if (c >= sentence_length) continue;
+          
+          // Get the context word. That is, get the id of the word (its index in
+          // the vocab table).
           last_word = sen[c];
+          
+          // Verify word exists in vocab.
           if (last_word == -1) continue;
+          
+          // Note that `c` is no longer the sentence position, it's just a 
+          // for-loop index.
+          // Add the gradient in the vector `neu1e` to the word vector for
+          // the current context word.
+          // syn0[last_word * layer1_size] <-- Accesses the word vector.
           for (c = 0; c < layer1_size; c++) syn0[c + last_word * layer1_size] += neu1e[c];
         }
       }
@@ -912,14 +1047,13 @@ void *TrainModelThread(void *id) {
      * ====================================
      *        Skip-gram Architecture
      * ====================================
-     * sen - This is the array of words in the sentence. Subsampling has already been
-     *       applied. I don't know what the word representation is...
+     * sen - This is the array of words in the sentence. Subsampling has 
+     *       already been applied. Words are represented by their ids.
      *
      * sentence_position - This is the index of the current input word.
      *
      * a - Offset into the current window, relative to the window start.
-     *     a will range from 0 to (window * 2) (TODO - not sure if it's inclusive or
-     *      not).
+     *     a will range from 0 to (window * 2) 
      *
      * b - The amount to shrink the context window by.
      *
