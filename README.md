@@ -4,7 +4,13 @@ This project is a functionally unaltered version of Google's published [word2vec
 
 If you're new to word2vec, I recommending reading [my tutorial](http://mccormickml.com/2016/04/19/word2vec-tutorial-the-skip-gram-model/) first.
 
-My focus is on the code in word2vec.c for training the skip-gram architecture with negative sampling, so for now I have ignored the CBOW and Hierarchical Softmax code. I also haven't looked much at the testing code. I have also commented the word2phrase.c tool, which implements the phrase detection.
+My focus is on the code in word2vec.c for training:
+* I have commented both the skip-gram and CBOW architectures with negative sampling
+* I haven't done Hierarchical Softmax yet for either architecture.
+
+I have also commented the word2phrase.c tool, which implements the phrase detection. 
+
+I haven't looked much at the testing code. 
 
 Because the code supports both models and both training approaches, I highly recommended viewing the code in an editor which allows you to collapse code blocks. The training code is much more readable when you hide the implementations that you aren't interested in. 
 
