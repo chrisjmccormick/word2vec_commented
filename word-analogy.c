@@ -110,17 +110,27 @@ int main(int argc, char **argv) {
     }
     if (b == 0) continue;
     printf("\n                                              Word              Distance\n------------------------------------------------------------------------\n");
+    
+    // Calculate (b - a) + c into `vec`
     for (a = 0; a < size; a++) vec[a] = M[a + bi[1] * size] - M[a + bi[0] * size] + M[a + bi[2] * size];
+    
+    // Normalize `vec`
     len = 0;
     for (a = 0; a < size; a++) len += vec[a] * vec[a];
     len = sqrt(len);
     for (a = 0; a < size; a++) vec[a] /= len;
+    
+    // Clear the results arrays?
     for (a = 0; a < N; a++) bestd[a] = 0;
     for (a = 0; a < N; a++) bestw[a][0] = 0;
+    
+    // Loop over the vocabulary...
     for (c = 0; c < words; c++) {
+      // Don't calculate distance with input words.
       if (c == bi[0]) continue;
       if (c == bi[1]) continue;
       if (c == bi[2]) continue;
+      
       a = 0;
       for (b = 0; b < cn; b++) if (bi[b] == c) a = 1;
       if (a == 1) continue;
