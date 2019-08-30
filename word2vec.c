@@ -437,20 +437,73 @@ void ReduceVocab() {
  * Frequent words will have short unique binary codes.
  * Huffman encoding is used for lossless compression.
  * The vocab_word structure contains a field for the 'code' for the word.
+ * The `point` array for a word is the list of negative samples to use
+ * (represented by their word ids), plus the word itself. 
+ * The `code` array for a word distinguishes the negative samples from
+ * the word.
  */
 void CreateBinaryTree() {
   long long a, b, i, min1i, min2i, pos1, pos2, point[MAX_CODE_LENGTH];
-  char code[MAX_CODE_LENGTH];
+  char code[MAX_CODE_LENGTH]; // Default is 40
+  
+  // Note that calloc initializes these arrays to 0.
   long long *count = (long long *)calloc(vocab_size * 2 + 1, sizeof(long long));
   long long *binary = (long long *)calloc(vocab_size * 2 + 1, sizeof(long long));
   long long *parent_node = (long long *)calloc(vocab_size * 2 + 1, sizeof(long long));
+  
+  // The count array is twice the size of the vocabulary, plus one.
+  //   - The first half of `count` becomes a list of the word counts 
+  //     for each word in the vocabulary. We do not modify this part of the
+  //     list.
+  //   - The second half of `count` is set to a large positive integer (1 
+  //     quadrillion). When we combine two trees under a word (e.g., word_id 
+  //     13), then we place the total weight of those subtrees into the word's
+  //     position in the second half (e.g., count[vocab_size + 13]).
+  //     
   for (a = 0; a < vocab_size; a++) count[a] = vocab[a].cn;
   for (a = vocab_size; a < vocab_size * 2; a++) count[a] = 1e15;
+  
+  // `pos1` and `pos2` are indeces into the `count` array.
+  //   - `pos1` starts at the middle of `count` (the end of the list of word
+  //     counts) and moves left.
+  //   - `pos2` starts at the beginning of the list of large integers and moves
+  //     right.
   pos1 = vocab_size - 1;
   pos2 = vocab_size;
-  // Following algorithm constructs the Huffman tree by adding one node at a time
+  
+  
+  /* ===============================
+   *   Step 1: Create Huffman Tree
+   * ===============================
+   * [Original Comment] Following algorithm constructs the Huffman tree by 
+   * adding one node at a time
+   * 
+   * The Huffman coding algorithm starts with every node as its own tree, and
+   * then combines the two smallest trees on each step. The weight of a tree is
+   * the sum of the word counts for the words it contains. 
+   * 
+   * Once the tree is constructed, you can use the `parent_node` array to 
+   * navigate it. For the word at index 13, for example, you would look at 
+   * parent_node[13], and then parent_node[parent_node[13]], and so on, till
+   * you reach the root.
+   *
+   * A Huffman tree stores all of the words in the vocabulary at the leaves.
+   * Frequent words have short paths, and infrequent words have long paths.
+   * Here, we are also associating each node of the tree with a vocabulary word.
+   * Every time we combine two trees and create a new node, we associate the 
+   * next word in the vocabulary with that node, such that the most frequent 
+   * words are tied to the nodes on the lower layers of the tree.
+   * The least frequent word in the vocabulary won't be assigned to a node.
+   * The root node will be associated with the second least frequent word.
+   */  
+  
+  // The number of tree combinations needed is equal to the size of the vocab - 1, 
+  // so, for each word in the vocabulary...  
+  
   for (a = 0; a < vocab_size - 1; a++) {
+
     // First, find two smallest nodes 'min1, min2'
+    // Find min1 (at index `min1i`)
     if (pos1 >= 0) {
       if (count[pos1] < count[pos2]) {
         min1i = pos1;
@@ -463,6 +516,8 @@ void CreateBinaryTree() {
       min1i = pos2;
       pos2++;
     }
+    
+    // Find min2 (at index `min2i`).
     if (pos1 >= 0) {
       if (count[pos1] < count[pos2]) {
         min2i = pos1;
@@ -475,27 +530,73 @@ void CreateBinaryTree() {
       min2i = pos2;
       pos2++;
     }
+    
+    // Calculate the combined weight. We could be combining two words, a word
+    // and a tree, or two trees.
     count[vocab_size + a] = count[min1i] + count[min2i];
+    
+    // Store the path for working back up the tree. 
     parent_node[min1i] = vocab_size + a;
     parent_node[min2i] = vocab_size + a;
+    
+    // binary[min1i] = 0; // This is implied.
+    // min1 is the left node and is labeled '0', min2 is the right node and is labeled '1'.
     binary[min2i] = 1;
   }
-  // Now assign binary code to each vocabulary word
+
+  /* ==========================================
+   *    Step 2: Define Samples for Each Word
+   * ==========================================
+   * [Original Comment] Now assign binary code to each vocabulary word
+   * 
+   *  vocab[word]
+   *    .code - A variable-length string of 0s and 1s.
+   *    .point - A variable-length array of word ids.
+   *    .codelen - The length of the `code` array. 
+   *               The point array has length codelen + 1.
+   * 
+   */  
+    
+  // For each word in the vocabulary...
   for (a = 0; a < vocab_size; a++) {
     b = a;
-    i = 0;
+    i = 0; // `i` stores the code length.
+    
+    // Construct the binary code...
+    //   `code` stores 1s and 0s.
+    //   `point` stores indeces.
+    // This loop works backwards from the leaf, so the `code` and `point` 
+    // lists end up in reverse order.
     while (1) {
+      // Lookup whether this is on the left or right of its parent node.
       code[i] = binary[b];
+      
       point[i] = b;
+      
+      // Increment the code length.
       i++;
+      
+      // This will always return an index in the second half of the array.
       b = parent_node[b];
+      
+      // We've reached the root when...
       if (b == vocab_size * 2 - 2) break;
     }
+    
+    // Record the code length (the length of the `point` list).
     vocab[a].codelen = i;
+    
+    // The first sample is always the second least frequent word
+    // in the vocabulary, since this is at the root of the tree.
     vocab[a].point[0] = vocab_size - 2;
+    
+    // For each bit in this word's code...
     for (b = 0; b < i; b++) {
+      // Reverse the code in `code` and store it in `vocab[a].code`
       vocab[a].code[i - b - 1] = code[b];
-      vocab[a].point[i - b] = point[b] - vocab_size;
+      
+      // Store the ids of the words to use as samples.
+      vocab[a].point[i - b] = point[b] - vocab_size;      
     }
   }
   free(count);
@@ -708,19 +809,39 @@ void *TrainModelThread(void *id) {
   
   // This loop covers the whole training operation...
   while (1) {
+    
+    /*
+     * ======== Variables ========
+     *       iter - This is the number of training epochs to run; default is 5.
+     * word_count - The number of input words processed.
+     * train_words - The total number of words in the training text (not 
+     *               including words removed from the vocabuly by ReduceVocab).
+     */
+    
     // This block prints a progress update, and also adjusts the training 
     // 'alpha' parameter.
     if (word_count - last_word_count > 10000) {
       word_count_actual += word_count - last_word_count;
+      
       last_word_count = word_count;
+      
+      // The percentage complete is based on the total number of passes we are
+      // doing and not just the current pass.      
       if ((debug_mode > 1)) {
         now=clock();
         printf("%cAlpha: %f  Progress: %.2f%%  Words/thread/sec: %.2fk  ", 13, alpha,
+         // Percent complete = [# of input words processed] / 
+         //                      ([# of passes] * [# of words in a pass])
          word_count_actual / (real)(iter * train_words + 1) * 100,
          word_count_actual / ((real)(now - start + 1) / (real)CLOCKS_PER_SEC * 1000));
         fflush(stdout);
       }
+      
+      // Update alpha to: [initial alpha] * [percent of training remaining]
+      // This means that alpha will gradually decrease as we progress through 
+      // the training text.
       alpha = starting_alpha * (1 - word_count_actual / (real)(iter * train_words + 1));
+      // Don't let alpha go below [initial alpha] * 0.0001.
       if (alpha < starting_alpha * 0.0001) alpha = starting_alpha * 0.0001;
     }
     
@@ -867,6 +988,8 @@ void *TrainModelThread(void *id) {
      *
      * target - The output word we're working on. If it's the positive sample
      *          then `label` is 1. `label` is 0 for negative samples.  
+     *          Note: `target` and `label` are only used in negative sampling,
+     *                and not HS.
      *
      * neu1 - This vector will hold the *average* of all of the context word
      *        vectors. This is the output of the hidden layer for CBOW.
@@ -926,15 +1049,33 @@ void *TrainModelThread(void *id) {
         for (c = 0; c < layer1_size; c++) neu1[c] /= cw;
         
         // // HIERARCHICAL SOFTMAX
+        // vocab[word]
+        //   .code - A variable-length list of 0s and 1s.
+        //   .point - A variable-length array of word ids.
+        //   .codelen - The length of the `code` and `point` arrays for this 
+        //              word.
+        // 
         if (hs) for (d = 0; d < vocab[word].codelen; d++) {
           f = 0;
+          // point[d] is the index of another word to use as a negative.
+          // l2 is the index of that word in the output layer weights (syn1).
           l2 = vocab[word].point[d] * layer1_size;
+          
           // Propagate hidden -> output
+          // neu1 is the average of the context words from the hidden layer.
+          // This loop computes the dot product between neu1 and the output
+          // weights for the negative word at point[d].
           for (c = 0; c < layer1_size; c++) f += neu1[c] * syn1[c + l2];
+          
+          // Apply the sigmoid activation to the output neuron for the negative
+          // word.
           if (f <= -MAX_EXP) continue;
           else if (f >= MAX_EXP) continue;
           else f = expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
-          // 'g' is the gradient multiplied by the learning rate
+          
+          // 'g' is the error multiplied by the learning rate.
+          // The error is (label - f), so label = (1 - code), meaning if
+          // code is 0, then this is a positive sample and vice versa.
           g = (1 - vocab[word].code[d] - f) * alpha;
           // Propagate errors output -> hidden
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1[c + l2];
@@ -1071,6 +1212,8 @@ void *TrainModelThread(void *id) {
      *
      * target - The output word we're working on. If it's the positive sample
      *          then `label` is 1. `label` is 0 for negative samples.
+     *          Note: `target` and `label` are only used in negative sampling,
+     *                and not HS.     
      */
     else {  
       // Loop over the positions in the context window (skipping the word at
@@ -1183,16 +1326,18 @@ void *TrainModelThread(void *id) {
           else g = (label - expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
           
           // Multiply the error by the output layer weights.
-          // (I think this is the gradient calculation?)
-          // Accumulate these gradients over all of the negative samples.
+          // Accumulate these gradients over the negative samples and the one
+          // positive sample.
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg[c + l2];
           
           // Update the output layer weights by multiplying the output error
           // by the hidden layer weights.
           for (c = 0; c < layer1_size; c++) syn1neg[c + l2] += g * syn0[c + l1];
         }
-        // Once the hidden layer gradients for all of the negative samples have
-        // been accumulated, update the hidden layer weights.
+        // Once the hidden layer gradients for the negative samples plus the 
+        // one positive sample have been accumulated, update the hidden layer
+        // weights. 
+        // Note that we do not average the gradient before applying it.
         for (c = 0; c < layer1_size; c++) syn0[c + l1] += neu1e[c];
       }
     }
@@ -1393,12 +1538,64 @@ int main(int argc, char **argv) {
   // Allocate the vocabulary table.
   vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
   
+  // Allocate the hash table for mapping word strings to word entries.
   vocab_hash = (int *)calloc(vocab_hash_size, sizeof(int));
+   
+  /*
+   * ======== Precomputed Exp Table ========
+   * To calculate the softmax output, they use a table of values which are
+   * pre-computed here.
+   *
+   * From the top of this file:
+   *   #define EXP_TABLE_SIZE 1000
+   *   #define MAX_EXP 6
+   *
+   * First, let's look at this inner term:
+   *     i / (real)EXP_TABLE_SIZE * 2 - 1
+   * This is just a straight line that goes from -1 to +1.
+   *    (0, -1.0), (1, -0.998), (2, -0.996), ... (999, 0.998), (1000, 1.0).
+   *
+   * Next, multiplying this by MAX_EXP = 6, it causes the output to range
+   * from -6 to +6 instead of -1 to +1.
+   *    (0, -6.0), (1, -5.988), (2, -5.976), ... (999, 5.988), (1000, 6.0).
+   *
+   * So the total input range of the table is 
+   *    Range = MAX_EXP * 2 = 12
+   * And the increment on the inputs is
+   *    Increment = Range / EXP_TABLE_SIZE = 0.012
+   *
+   * Let's say we want to compute the output for the value x = 0.25. How do
+   * we calculate the position in the table?
+   *    index = (x - -MAX_EXP) / increment
+   * Which we can re-write as:
+   *    index = (x + MAX_EXP) / (range / EXP_TABLE_SIZE)
+   *          = (x + MAX_EXP) / ((2 * MAX_EXP) / EXP_TABLE_SIZE)
+   *          = (x + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2)
+   *
+   * The last form is what we find in the code elsewhere for using the table:
+   *    expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]
+   * 
+   */
+
+  // Allocate the table, 1000 floats.
   expTable = (real *)malloc((EXP_TABLE_SIZE + 1) * sizeof(real));
+  
+  // For each position in the table...
   for (i = 0; i < EXP_TABLE_SIZE; i++) {
+    
+    // Calculate the output of e^x for values in the range -6.0 to +6.0.
     expTable[i] = exp((i / (real)EXP_TABLE_SIZE * 2 - 1) * MAX_EXP); // Precompute the exp() table
+    
+    // Currently the table contains the function exp(x).
+    // We are going to replace this with exp(x) / (exp(x) + 1), which is
+    // just the sigmoid activation function! 
+    // Note that 
+    //    exp(x) / (exp(x) + 1) 
+    // is equivalent to 
+    //    1 / (1 + exp(-x))
     expTable[i] = expTable[i] / (expTable[i] + 1);                   // Precompute f(x) = x / (x + 1)
   }
+  
   TrainModel();
   return 0;
 }
