@@ -436,11 +436,12 @@ void ReduceVocab() {
  * Create binary Huffman tree using the word counts.
  * Frequent words will have short unique binary codes.
  * Huffman encoding is used for lossless compression.
- * The vocab_word structure contains a field for the 'code' for the word.
- * The `point` array for a word is the list of negative samples to use
- * (represented by their word ids), plus the word itself. 
- * The `code` array for a word distinguishes the negative samples from
- * the word.
+ * For each vocabulary word, the vocab_word structure includes a `point` array, 
+ * which is the list of internal tree nodes which:
+ *   1. Define the path from the root to the leaf node for the word.
+ *   2. Each correspond to a row of the output matrix.
+ * The `code` array is a list of 0s and 1s which specifies whether each output
+ * in `point` should be trained to output 0 or 1.
  */
 void CreateBinaryTree() {
   long long a, b, i, min1i, min2i, pos1, pos2, point[MAX_CODE_LENGTH];
@@ -489,17 +490,13 @@ void CreateBinaryTree() {
    *
    * A Huffman tree stores all of the words in the vocabulary at the leaves.
    * Frequent words have short paths, and infrequent words have long paths.
-   * Here, we are also associating each node of the tree with a vocabulary word.
-   * Every time we combine two trees and create a new node, we associate the 
-   * next word in the vocabulary with that node, such that the most frequent 
-   * words are tied to the nodes on the lower layers of the tree.
-   * The least frequent word in the vocabulary won't be assigned to a node.
-   * The root node will be associated with the second least frequent word.
+   * Here, we are also associating each internal node of the tree with a 
+   * row of the output matrix. Every time we combine two trees and create a 
+   * new node, we give it a row in the output matrix.
    */  
   
-  // The number of tree combinations needed is equal to the size of the vocab - 1, 
-  // so, for each word in the vocabulary...  
-  
+  // The number of tree combinations needed is equal to the size of the vocab,
+  // minus 1.
   for (a = 0; a < vocab_size - 1; a++) {
 
     // First, find two smallest nodes 'min1, min2'
@@ -540,7 +537,8 @@ void CreateBinaryTree() {
     parent_node[min2i] = vocab_size + a;
     
     // binary[min1i] = 0; // This is implied.
-    // min1 is the left node and is labeled '0', min2 is the right node and is labeled '1'.
+    // min1 is the (left?) node and is labeled '0', min2 is the (right?) node
+    // and is labeled '1'.
     binary[min2i] = 1;
   }
 
@@ -551,9 +549,9 @@ void CreateBinaryTree() {
    * 
    *  vocab[word]
    *    .code - A variable-length string of 0s and 1s.
-   *    .point - A variable-length array of word ids.
+   *    .point - A variable-length array of output row indeces.
    *    .codelen - The length of the `code` array. 
-   *               The point array has length codelen + 1.
+   *               The point array has length `codelen + 1`.
    * 
    */  
     
@@ -571,6 +569,7 @@ void CreateBinaryTree() {
       // Lookup whether this is on the left or right of its parent node.
       code[i] = binary[b];
       
+      // Note: point[0] always holds the word iteself...
       point[i] = b;
       
       // Increment the code length.
@@ -586,8 +585,7 @@ void CreateBinaryTree() {
     // Record the code length (the length of the `point` list).
     vocab[a].codelen = i;
     
-    // The first sample is always the second least frequent word
-    // in the vocabulary, since this is at the root of the tree.
+    // The root node is at row `vocab_size - 2` of the output matrix. 
     vocab[a].point[0] = vocab_size - 2;
     
     // For each bit in this word's code...
@@ -595,7 +593,9 @@ void CreateBinaryTree() {
       // Reverse the code in `code` and store it in `vocab[a].code`
       vocab[a].code[i - b - 1] = code[b];
       
-      // Store the ids of the words to use as samples.
+      // Store the row indeces of the internal nodes leading to this word.
+      // These are the set of outputs which will be trained every time
+      // this word is encountered in the training data as an output word.
       vocab[a].point[i - b] = point[b] - vocab_size;      
     }
   }
@@ -1050,25 +1050,26 @@ void *TrainModelThread(void *id) {
         
         // // HIERARCHICAL SOFTMAX
         // vocab[word]
-        //   .code - A variable-length list of 0s and 1s.
-        //   .point - A variable-length array of word ids.
-        //   .codelen - The length of the `code` and `point` arrays for this 
+        //   .point - A variable-length list of row ids, which are the output
+        //            rows to train on.
+        //   .code - A variable-length list of 0s and 1s, which are the desired
+        //           labels for the outputs in `point`.
+        //   .codelen - The length of the `code` array for this 
         //              word.
         // 
         if (hs) for (d = 0; d < vocab[word].codelen; d++) {
           f = 0;
-          // point[d] is the index of another word to use as a negative.
+          // point[d] is the index of a row of the ouput matrix.
           // l2 is the index of that word in the output layer weights (syn1).
           l2 = vocab[word].point[d] * layer1_size;
           
           // Propagate hidden -> output
           // neu1 is the average of the context words from the hidden layer.
           // This loop computes the dot product between neu1 and the output
-          // weights for the negative word at point[d].
+          // weights for the output word at point[d].
           for (c = 0; c < layer1_size; c++) f += neu1[c] * syn1[c + l2];
           
-          // Apply the sigmoid activation to the output neuron for the negative
-          // word.
+          // Apply the sigmoid activation to the current output neuron.
           if (f <= -MAX_EXP) continue;
           else if (f >= MAX_EXP) continue;
           else f = expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
