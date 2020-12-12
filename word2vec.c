@@ -815,7 +815,7 @@ void *TrainModelThread(void *id) {
      *       iter - This is the number of training epochs to run; default is 5.
      * word_count - The number of input words processed.
      * train_words - The total number of words in the training text (not 
-     *               including words removed from the vocabuly by ReduceVocab).
+     *               including words removed from the vocabulary by ReduceVocab).
      */
     
     // This block prints a progress update, and also adjusts the training 
