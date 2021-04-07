@@ -847,7 +847,15 @@ void *TrainModelThread(void *id) {
     
     // This 'if' block retrieves the next sentence from the training text and
     // stores it in 'sen'.
-    // TODO - Under what condition would sentence_length not be zero?
+    //
+    // Note the main while loop do two things:
+    // 1. run this 'if' block to prepare sentence, and
+    // 2. move one word forward in current sentence, i.e., 'sentence_position++',
+    //    prepare context and target, and do the forward computation and backward
+    //    propagation
+    //
+    // the if statement here check whether the training process just start or just
+    // finished the last sentence, and need to prepare a new sentence to do part 2 
     if (sentence_length == 0) {
       while (1) {
         // Read the next word from the training data and lookup its index in 
